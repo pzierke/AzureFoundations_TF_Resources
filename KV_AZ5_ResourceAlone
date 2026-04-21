@@ -1,0 +1,99 @@
+terraform {
+  required_version = ">= 1.5.0"
+
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+  subscription_id = var.subscription_id
+}
+
+data "azurerm_client_config" "current" {}
+
+resource "random_string" "kv_suffix" {
+  length  = 6
+  upper   = false
+  special = false
+  numeric = true
+}
+
+variable "subscription_id" {
+  description = "Azure subscription ID"
+  type        = string
+}
+
+variable "resource_group_name" {
+  description = "Existing resource group name where the Key Vault will be deployed"
+  type        = string
+}
+
+variable "location" {
+  description = "Azure region for the Key Vault"
+  type        = string
+}
+
+variable "key_vault_name_prefix" {
+  description = "Prefix for the Key Vault name. A random suffix is appended for uniqueness."
+  type        = string
+  default     = "kvaf5"
+}
+
+variable "tenant_id" {
+  description = "Optional tenant ID. If not provided, the current authenticated tenant is used."
+  type        = string
+  default     = null
+}
+
+variable "sku_name" {
+  description = "Key Vault SKU"
+  type        = string
+  default     = "standard"
+}
+
+locals {
+  tenant_id      = coalesce(var.tenant_id, data.azurerm_client_config.current.tenant_id)
+  key_vault_name = lower("${var.key_vault_name_prefix}${random_string.kv_suffix.result}")
+}
+
+resource "azurerm_key_vault" "this" {
+  name                          = local.key_vault_name
+  location                      = var.location
+  resource_group_name           = var.resource_group_name
+  tenant_id                     = local.tenant_id
+  sku_name                      = var.sku_name
+
+  # CIS / Azure Foundations aligned settings that are enforceable
+  # directly on the vault resource itself
+  enable_rbac_authorization     = true
+  public_network_access_enabled = false
+  purge_protection_enabled      = true
+  soft_delete_retention_days    = 90
+
+  network_acls {
+    default_action = "Deny"
+    bypass         = "None"
+  }
+
+  tags = {
+    SecurityBaseline = "CIS-Azure-Foundations-v5.0"
+    ManagedBy        = "Terraform"
+  }
+}
+
+output "key_vault_name" {
+  value = azurerm_key_vault.this.name
+}
+
+output "key_vault_id" {
+  value = azurerm_key_vault.this.id
+}
